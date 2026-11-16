@@ -19,14 +19,15 @@ your PATH and use it directly:
 """
 import os
 import sys
-import shutil
 import subprocess
 
 DIST = os.path.join(os.path.dirname(__file__), "dist")
 
 
 def check_pyinstaller():
-    if shutil.which("pyinstaller") is None:
+    try:
+        import PyInstaller  # noqa: F401
+    except ImportError:
         print("PyInstaller not found. Installing...")
         subprocess.check_call([sys.executable, "-m", "pip", "install", "pyinstaller"])
 
@@ -37,8 +38,10 @@ def build():
     root = os.path.dirname(os.path.abspath(__file__))
     entry = os.path.join(root, "waka.py")
 
+    # Run PyInstaller with this interpreter, so the binary bundles the same
+    # Python that runs this script (not whichever `pyinstaller` is on PATH).
     cmd = [
-        "pyinstaller",
+        sys.executable, "-m", "PyInstaller",
         "--onefile",
         "--name", "waka",
         "--distpath", DIST,
@@ -48,12 +51,17 @@ def build():
         "--add-data", f"{os.path.join(root, 'src')}{os.pathsep}src",
         # Include example files
         "--add-data", f"{os.path.join(root, 'examples')}{os.pathsep}examples",
+        # C runtime used by `waka build` (waka.py looks for it next to itself)
+        "--add-data", f"{os.path.join(root, 'runtime')}{os.pathsep}runtime",
         "--hidden-import", "src.lexer",
         "--hidden-import", "src.parser",
         "--hidden-import", "src.interpreter",
         "--hidden-import", "src.builtins",
         "--hidden-import", "src.ast_nodes",
         "--hidden-import", "src.web_server",
+        "--hidden-import", "src.transpiler",
+        "--hidden-import", "src.type_checker",
+        "--hidden-import", "src.formatter",
         entry,
     ]
 

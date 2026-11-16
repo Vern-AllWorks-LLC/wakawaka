@@ -1,5 +1,9 @@
 name: Build Wakawaka Binaries
 
+# Builds the single-file `waka` binary (PyInstaller) for Linux x86_64/aarch64,
+# macOS Apple Silicon/Intel and Windows x86_64, smoke-tests each one, and on a
+# v* tag (or a manual run with publish=true) attaches them to the GitHub Release.
+
 on:
   push:
     branches: [main]
@@ -7,75 +11,127 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Version used in file names and the release (e.g. v1.1.0)'
+        required: true
+      publish:
+        description: 'Upload to the GitHub Release (false = build artifacts only)'
+        type: boolean
+        default: false
+
+env:
+  # Linux builds bundle a python-build-standalone CPython (glibc 2.17
+  # baseline) so the binary runs on older distributions, not just the
+  # runner's glibc.
+  PBS_RELEASE: '20261026'
+  PBS_PYTHON: '3.12.16'
+  PYINSTALLER: '6.11.1'
 
 jobs:
   build:
-    name: Build (${{ matrix.os }})
+    name: ${{ matrix.platform }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            artifact_name: waka-linux
-            binary: dist/waka
-          - os: windows-latest
-            artifact_name: waka-windows
-            binary: dist/waka.exe
-          - os: macos-latest
-            artifact_name: waka-macos
-            binary: dist/waka
+          - { os: ubuntu-22.04,     platform: linux-x86_64,   pytriple: x86_64-unknown-linux-gnu }
+          - { os: ubuntu-22.04-arm, platform: linux-aarch64,  pytriple: aarch64-unknown-linux-gnu }
+          - { os: macos-latest,     platform: macos-arm64 }
+          - { os: macos-15-intel,   platform: macos-x86_64 }
+          - { os: windows-latest,   platform: windows-x86_64 }
+
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Set up Python (macOS / Windows)
+        if: runner.os != 'Linux'
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - name: Install PyInstaller
-        run: pip install pyinstaller
+      - name: Set up Python (Linux, python-build-standalone)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          F="cpython-${PBS_PYTHON}+${PBS_RELEASE}-${{ matrix.pytriple }}-install_only.tar.gz"
+          U="https://github.com/astral-sh/python-build-standalone/releases/download/${PBS_RELEASE}"
+          cd "$RUNNER_TEMP"
+          curl -fsSLO "$U/$F"
+          curl -fsSL "$U/SHA256SUMS" -o SHA256SUMS
+          grep " $F\$" SHA256SUMS | sha256sum -c -
+          tar -xzf "$F"
+          echo "$RUNNER_TEMP/python/bin" >> "$GITHUB_PATH"
 
       - name: Build binary
-        run: python build_waka.py
+        run: |
+          set -euo pipefail
+          # python3 on Linux (bundled CPython); python elsewhere (setup-python,
+          # avoiding the Microsoft Store python3 stub on Windows).
+          if [ "$RUNNER_OS" = "Linux" ]; then PY=python3; else PY=python; fi
+          "$PY" -VV
+          "$PY" -m pip install --quiet "pyinstaller==${PYINSTALLER}"
+          "$PY" build_waka.py
+          VERSION="${{ github.event.inputs.tag || github.ref_name }}"
+          case "$VERSION" in v*) ;; *) VERSION="dev-${GITHUB_SHA::7}" ;; esac
+          EXT=""; [ "$RUNNER_OS" = "Windows" ] && EXT=".exe"
+          ASSET="waka-${VERSION}-${{ matrix.platform }}${EXT}"
+          mkdir -p release
+          cp "dist/waka${EXT}" "release/$ASSET"
+          (cd release && { command -v sha256sum >/dev/null && sha256sum "$ASSET" || shasum -a 256 "$ASSET"; } > "$ASSET.sha256")
+          echo "ASSET=$ASSET" >> "$GITHUB_ENV"
 
-      - name: Upload artifact
+      - name: Smoke-test binary
+        run: |
+          set -euo pipefail
+          T="$RUNNER_TEMP/smoke"; rm -rf "$T"; mkdir -p "$T"
+          EXT=""; [ "$RUNNER_OS" = "Windows" ] && EXT=".exe"
+          cp "release/$ASSET" "$T/waka$EXT"; chmod +x "$T/waka$EXT"
+          cp examples/hello.wk "$T/"
+          cd "$T"   # away from the source tree: everything must come from the binary
+          ./waka$EXT version
+          ./waka$EXT run hello.wk | tee run.txt
+          grep -q "Hello, World!" run.txt
+          ./waka$EXT check hello.wk
+          if [ "$RUNNER_OS" != "Windows" ]; then
+            ./waka build hello.wk -o hello_native
+            ./hello_native | tee native.txt
+            grep -q "Hello, World!" native.txt
+          fi
+
+      # Linux: the binary must also run on an older distribution (glibc 2.31).
+      - name: Smoke-test on Debian 11 (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          T="$RUNNER_TEMP/smoke"
+          docker run --rm -v "$T:/t" -w /t debian:11-slim sh -c './waka version && ./waka run hello.wk'
+
+      - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}
-          path: ${{ matrix.binary }}
+          name: ${{ env.ASSET }}
+          path: |
+            release/${{ env.ASSET }}
+            release/${{ env.ASSET }}.sha256
           if-no-files-found: error
+          retention-days: 14
 
-  release:
-    name: Create Release
-    needs: build
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
-    permissions:
-      contents: write
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts/
-
-      - name: Prepare release assets + checksums
-        run: |
-          mkdir -p release
-          cp artifacts/waka-linux/waka       release/waka-linux
-          cp artifacts/waka-windows/waka.exe release/waka-windows.exe
-          cp artifacts/waka-macos/waka       release/waka-macos
-          cd release
-          for f in waka-linux waka-windows.exe waka-macos; do
-            sha256sum "$f" > "$f.sha256"
-          done
-          ls -la
-
-      - name: Create GitHub Release
+      - name: Upload to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.publish == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          files: release/*
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: |
+            release/${{ env.ASSET }}
+            release/${{ env.ASSET }}.sha256
           generate_release_notes: true
+
+permissions:
+  contents: write

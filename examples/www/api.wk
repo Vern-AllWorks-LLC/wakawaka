@@ -9,7 +9,7 @@ import python "json" as pyjson;
 if method == "GET" {
     let data = {
         "lang":    "Wakawaka",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "method":  method,
         "path":    path,
         "params":  request.GET,

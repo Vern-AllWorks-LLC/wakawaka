@@ -189,7 +189,7 @@ def _run_wk_page(filepath: str, request_info: dict) -> tuple[int, dict, str]:
     env.define("$_SERVER", {
         "REQUEST_METHOD":  request_info.get("method", "GET"),
         "REQUEST_URI":     request_info.get("path", "/"),
-        "SERVER_SOFTWARE": "Wakawaka/1.0.0",
+        "SERVER_SOFTWARE": "Wakawaka/1.1.0",
         "REMOTE_ADDR":     request_info.get("remote_addr", ""),
     })
 

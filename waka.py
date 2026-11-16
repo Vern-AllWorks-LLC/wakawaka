@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from src.parser import parse
 from src.interpreter import Interpreter, DeltooRuntimeError, _Panic
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 BANNER = f"""
   ██╗    ██╗ █████╗ ██╗  ██╗ █████╗ ██╗    ██╗ █████╗ ██╗  ██╗ █████╗
   ██║    ██║██╔══██╗██║ ██╔╝██╔══██╗██║    ██║██╔══██╗██║ ██╔╝██╔══██╗
