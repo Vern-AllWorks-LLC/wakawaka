@@ -56,7 +56,7 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Set up Python (Linux, python-build-standalone)
+      - name: Fetch Python (Linux, python-build-standalone)
         if: runner.os == 'Linux'
         run: |
           set -euo pipefail
@@ -67,17 +67,26 @@ jobs:
           curl -fsSL "$U/SHA256SUMS" -o SHA256SUMS
           grep " $F\$" SHA256SUMS | sha256sum -c -
           tar -xzf "$F"
-          echo "$RUNNER_TEMP/python/bin" >> "$GITHUB_PATH"
 
       - name: Build binary
         run: |
           set -euo pipefail
-          # python3 on Linux (bundled CPython); python elsewhere (setup-python,
-          # avoiding the Microsoft Store python3 stub on Windows).
-          if [ "$RUNNER_OS" = "Linux" ]; then PY=python3; else PY=python; fi
-          "$PY" -VV
-          "$PY" -m pip install --quiet "pyinstaller==${PYINSTALLER}"
-          "$PY" build_waka.py
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            # Run PyInstaller in a manylinux_2_28 container: it bundles system
+            # libraries such as libgcc_s, which must not need a newer glibc
+            # than the target machines have.
+            docker run --rm -v "$PWD:/w" -v "$RUNNER_TEMP/python:/py" -w /w \
+              -e PYINSTALLER "quay.io/pypa/manylinux_2_28_$(uname -m)" bash -euc '
+                /py/bin/python3 -VV
+                /py/bin/python3 -m pip install --quiet --root-user-action=ignore "pyinstaller==${PYINSTALLER}"
+                /py/bin/python3 build_waka.py'
+            sudo chown -R "$(id -u):$(id -g)" dist build
+          else
+            # python from setup-python (avoids the Microsoft Store python3 stub on Windows)
+            python -VV
+            python -m pip install --quiet "pyinstaller==${PYINSTALLER}"
+            python build_waka.py
+          fi
           VERSION="${{ github.event.inputs.tag || github.ref_name }}"
           case "$VERSION" in v*) ;; *) VERSION="dev-${GITHUB_SHA::7}" ;; esac
           EXT=""; [ "$RUNNER_OS" = "Windows" ] && EXT=".exe"

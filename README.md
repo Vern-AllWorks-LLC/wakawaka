@@ -592,6 +592,12 @@ let msg: str = "hello";
 
 WakaWaka is written in Python and packaged into a single self-contained `waka` executable with PyInstaller. Build natively on each OS — PyInstaller does not cross-compile. The optional `waka build` command (which transpiles a `.wk` program to C99 and compiles it) additionally needs a C compiler — gcc, clang, or MSVC — on that machine.
 
+### Prebuilt downloads
+
+Single-file `waka` binaries for Linux (x86_64, aarch64), macOS (Apple Silicon, Intel) and Windows (x86_64) are on the GitHub Release and <https://vernallworks.com/downloads.php>. Rename the download to `waka` (`waka.exe` on Windows), make it executable (`chmod +x waka`), and put it on your PATH. `waka build` additionally needs gcc or clang.
+
+**Tip:** The binaries are not code-signed. On macOS, clear the download quarantine with `xattr -d com.apple.quarantine waka`; on Windows, SmartScreen may ask you to confirm the first run.
+
 ### Linux
 
 ```
@@ -628,21 +634,7 @@ python build_waka.py         :: -> dist\waka.exe
 
 ### Automated builds (GitHub Actions)
 
-A single workflow with a runner matrix builds every binary on each push and uploads them as release artifacts — no local build machines required.
-
-```
-strategy:
-  matrix:
-    os: [ubuntu-latest, macos-14, macos-13, windows-latest]
-runs-on: ${{ matrix.os }}
-steps:
-  - uses: actions/checkout@v4
-  - uses: actions/setup-python@v5
-    with: { python-version: '3.12' }
-  - run: python build_waka.py
-  - uses: actions/upload-artifact@v4
-    with: { name: waka-${{ matrix.os }}, path: dist/* }
-```
+`.github/workflows/build.yml` builds the `waka` binary on `ubuntu-22.04`, `ubuntu-22.04-arm`, `macos-latest`, `macos-15-intel` and `windows-latest` runners. Linux builds bundle a python-build-standalone CPython so the binary runs on glibc 2.17+ distributions (also tested on Debian 11). Each binary is smoke-tested away from the source tree (`version`, `run`, `check`, and on Linux/macOS `build` plus running the native result); a `v*` tag attaches them, with SHA-256 files, to the GitHub Release.
 
 **Use case:** Produce macOS, Linux and Windows binaries reproducibly from one push; add signing/notarization steps with your certificates stored as encrypted secrets.
 
